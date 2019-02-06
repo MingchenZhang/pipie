@@ -157,7 +157,6 @@ func (config ForwardPortClientConfig) ForwardPortClient(ctx context.Context, com
 	log.Infof("port forward server started")
 	log.Infof("listen on %s:%d", config.ListenHost, config.ListenPort)
 	config.PortForwardClientLoop(t, commonSession, commandReadC, connReadC, cDealer)
-	// TODO: wait and handle exit
 
 	return nil
 }

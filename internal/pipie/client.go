@@ -299,7 +299,9 @@ func client(
 	pairConnBuilder.SetPairIDAndKey([]byte(*serverConfirmation.PairID), generatePairConnKey(pairKey, []byte(accessKey)))
 	pairConnBuilder.SetRendezvousServer(NatRendezvousServer)
 	pairConnBuilder.SetTLS(serviceConfig.Cert)
-	//pairConnBuilder.SetForceRelay() // TODO: add setting for this
+	if serviceConfig.ForceRelay {
+		pairConnBuilder.SetForceRelay()
+	}
 	pairConnBuilder.SetRelayTemp(relayURL, &peerDeviceID)
 	err = doPair(pairConnBuilder)
 	if err != nil {

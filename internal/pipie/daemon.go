@@ -1,6 +1,7 @@
 package pipie
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -130,7 +131,6 @@ func DaemonLoop(
 	return nil
 }
 
-// TODO: don't forget to handle its panic
 func (d *daemon) handleExchange(ctx context.Context, t *tomb.Tomb, oriPayload []byte) error {
 	// peal off the transfer layer
 	if oriPayload[0] != transferVersion {
@@ -145,7 +145,10 @@ func (d *daemon) handleExchange(ctx context.Context, t *tomb.Tomb, oriPayload []
 		log.Errorf("unable to unpack transfer packet")
 		return err
 	}
-	// TODO: check transfer code matching
+	if !bytes.Equal(transferFrame.Destination[:], d.transferCode[:]) {
+		log.Errorf("transfer packet destination not matched")
+		return err
+	}
 	payload := oriPayload[TransferFrameSize:]
 	exchange := exchangestruct.ExchangeFrame{}
 	err = proto.Unmarshal(payload, &exchange)
@@ -200,7 +203,6 @@ func (d *daemon) handleExchange(ctx context.Context, t *tomb.Tomb, oriPayload []
 			}
 			// prepare some fields
 			pairKey := responsePayload.PairKey
-			// TODO: perhaps check pairKey length, to prevent client mistake?
 			relayURL, err := getRelayServer()
 			if err != nil {
 				log.Error(err)

@@ -133,7 +133,6 @@ func (config ForwardPortServerConfig) ForwardPortServer(ctx context.Context, com
 	log.Infof("port forward server started")
 	log.Infof("forward to %s:%d", config.DestHost, config.DestPort)
 	config.PortForwardServerLoop(t, commonSession, commandReadC, cDealer)
-	// TODO: wait and handle exit
 
 	return nil
 }
@@ -162,7 +161,6 @@ func (config ForwardPortServerConfig) PortForwardServerLoop(
 			}
 			switch commandSignal.Type {
 			case SignalConnect:
-				// TODO: check some conditions, decide to allow the connection or not
 				// attempt to connect
 				destAddr := config.DestHost + ":" + strconv.Itoa(int(config.DestPort))
 				log.Infof("connecting to destination: %s", destAddr)
@@ -219,7 +217,7 @@ func startPairing(ctx context.Context, commonSession pairconnect.MuxSession, lis
 	var conn net.Conn
 	var err error
 	if asServer {
-		// TODO: client might send multiple requests and produce race conditions for stream, can possibly cause mismatch of connection. It is not gonna be an issue if server only serve one port per ForwardPortServer call, like now. It could use a stream identifier.
+		// TODO: client might send multiple requests and produce race conditions for stream, can possibly cause mismatch of connection. It is not gonna be an issue if server only serve one port per ForwardPortServer call, like now. To improve, it could use a stream identifier.
 		conn, err = commonSession.Accept()
 		if err != nil {
 			log.Errorf("cannot accept stream on common session")

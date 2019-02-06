@@ -36,9 +36,8 @@ var log, _ = logging.GetLogger("pipie")
 // TODO: check all error handling
 // TODO: check all timeout (freeze)
 // TODO: handle panic in daemon
-// TODO: test port forward, dest is not reachable (and other failure)
+// TODO: test port forward, dest is not reachable (and other failures)
 // TODO: investigate port forward server mem leakage if client crash. unclosed kcp conn or what not
-// TODO: investigate server freeze on close in port forwarding
 func TestMain() {
 	var err error
 
@@ -104,7 +103,7 @@ func TestMain() {
 	})
 	argForceRelay := parser.Flag("", "use-relay", &argparse.Options{
 		Required: false,
-		Help:     "Force connection to use relay",
+		Help:     "Force connection to use relay. Server and client has to use same setting",
 	})
 	argUserName := parser.String("n", "name", &argparse.Options{
 		Required: true,
@@ -265,7 +264,7 @@ func generateCert(certName string, keyName string) {
 			Organization: []string{"plain_pair"},
 		},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // TODO: increase duration
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // TODO: increase duration and detect cert expiration
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,

@@ -132,7 +132,6 @@ func (config PairConnectionConfig) connectTo() (net.Conn, *pairInfoMeta, error) 
 	var connectionMeta *pairInfoMeta
 	var err error
 	var newConn net.Conn
-	// TODO: update TLS version (which also has to support tls-psk), so that the close can unblock blocked write
 	if config.connBuilder.forceRelay {
 		log.Infof("direct connection skipped")
 		goto RelaySkip
@@ -199,7 +198,7 @@ RelaySkip:
 				client.Stop()
 				return nil, nil, errors.New("timeout")
 			}
-			client.Stop() // TODO: make sure it is safe to close protocol mode connection here
+			client.Stop()
 			log.Debugf("joining relay session")
 			relayedConn, err := syncthingrelayclient.JoinSession(inv)
 			if err != nil {
@@ -320,7 +319,7 @@ func tlsIdentityCheck(myCert *tls.Certificate, conn *tls.Conn, key []byte) (bool
 	hash.Write(key)
 	peerIdentityKey := hash.Sum(nil)
 	magic := []byte(handshakeMagic)
-	_, err = conn.Write(magic) // TODO: looping needed?
+	_, err = conn.Write(magic)
 	_, err = conn.Write(myIdentityKey)
 	if err != nil {
 		return false, err

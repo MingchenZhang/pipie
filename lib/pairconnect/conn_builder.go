@@ -174,7 +174,7 @@ func (config buildConnectionConfig) buildConnectionTCP() (net.Conn, *pairInfoMet
 		"interfacePort": localAddrA[1],
 	}
 	toSendB, _ := json.Marshal(toSend)
-	conn.Write(append(toSendB[:], []byte("\n")[:]...)) // TODO: should handle error?
+	conn.Write(append(toSendB[:], []byte("\n")[:]...))
 	message, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
 		log.Notice("failed to read from traversal server")
