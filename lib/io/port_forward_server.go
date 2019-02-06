@@ -1,10 +1,11 @@
-package internal
+package io
 
 import (
 	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"github.com/mingchenzhang/pipie/lib/pairconnect"
 	"gopkg.in/tomb.v2"
 	"io"
 	"net"
@@ -31,31 +32,27 @@ const (
 )
 
 type ForwardPortServerConfig struct {
-	SockConfig SecureSocketConfig
-	TargetIP   string
-	TargetPort int
+	DestHost string
+	DestPort uint16
 }
 
-func (config ForwardPortServerConfig) ForwardPortServer(ctx context.Context, commonSession muxSession) (error) {
+func (config ForwardPortServerConfig) ForwardPortServer(ctx context.Context, commonSession pairconnect.MuxSession) error {
 	var err error
 	var t *tomb.Tomb
 	t, ctx = tomb.WithContext(ctx)
 	defer func() {
-		if err := recover(); err != nil {
-			panic(err)
-		}
 		t.Kill(nil)
 		t.Wait()
 	}()
-	go func() {
-		// handle signal goroutine
-		select {
-		case <- signalSIGINT:
-			t.Kill(nil)
-		case <- t.Dead():
-		}
-	}()
-	commandStream, err := commonSession.AcceptStream()
+	//go func() {
+	//	// handle signal goroutine
+	//	select {
+	//	case <- signal.SignalSIGINT:
+	//		t.Kill(nil)
+	//	case <- t.Dead():
+	//	}
+	//}()
+	commandStream, err := commonSession.Accept()
 	if err != nil {
 		log.Errorf("cannot accept stream on common session")
 		return err
@@ -120,6 +117,7 @@ func (config ForwardPortServerConfig) ForwardPortServer(ctx context.Context, com
 					log.Debugf("read from a closed socket")
 					break
 				} else if strings.Contains(err.Error(), "broken pipe") {
+					log.Debugf("broken pipe on command channel")
 					break
 				} else {
 					log.Errorf("%s, %+v\n", "unexpected error", err)
@@ -133,7 +131,7 @@ func (config ForwardPortServerConfig) ForwardPortServer(ctx context.Context, com
 
 	// main loop
 	log.Infof("port forward server started")
-	log.Infof("forward to %s:%d", config.TargetIP, config.TargetPort)
+	log.Infof("forward to %s:%d", config.DestHost, config.DestPort)
 	config.PortForwardServerLoop(t, commonSession, commandReadC, cDealer)
 	// TODO: wait and handle exit
 
@@ -142,18 +140,20 @@ func (config ForwardPortServerConfig) ForwardPortServer(ctx context.Context, com
 
 func (config ForwardPortServerConfig) PortForwardServerLoop(
 	t *tomb.Tomb,
-	commonSession muxSession,
+	commonSession pairconnect.MuxSession,
 	commandReadC chan *PortForwardSignal,
 	cDealer signalDealer,
-) (error) {
+) error {
 	for {
 		// detect cancellation
-		select{
-		case <- t.Dying(): return nil
+		select {
+		case <-t.Dying():
+			return nil
 		default:
 		}
 		select {
-		case <- t.Dying(): return nil
+		case <-t.Dying():
+			return nil
 		case commandSignal, ok := <-commandReadC:
 			if !ok {
 				// command socket closed
@@ -162,12 +162,13 @@ func (config ForwardPortServerConfig) PortForwardServerLoop(
 			}
 			switch commandSignal.Type {
 			case SignalConnect:
-				// TODO: check some conditions
+				// TODO: check some conditions, decide to allow the connection or not
 				// attempt to connect
-				log.Infof("forwarding connection...")
-				conn, err := net.Dial("tcp", config.TargetIP+":"+strconv.Itoa(config.TargetPort))
+				destAddr := config.DestHost + ":" + strconv.Itoa(int(config.DestPort))
+				log.Infof("connecting to destination: %s", destAddr)
+				conn, err := net.Dial("tcp", destAddr)
 				if err != nil {
-					log.Debug("forward failed:", err)
+					log.Debug("connection to destination failed:", err)
 					var code PortForwardSignalCode
 					if err.(net.Error).Timeout() {
 						code = CodePortTimeout
@@ -183,10 +184,11 @@ func (config ForwardPortServerConfig) PortForwardServerLoop(
 					errorAssert(err)
 					break
 				}
+				log.Debug("connected to destination")
 				// send back the good news
 				var toSend = PortForwardSignal{
-					Version:       protocolVersion,
-					Type:          SignalConnectAgree,
+					Version: protocolVersion,
+					Type:    SignalConnectAgree,
 				}
 				err = cDealer.SendSignal(&toSend)
 				errorAssert(err)
@@ -202,7 +204,7 @@ func (config ForwardPortServerConfig) PortForwardServerLoop(
 	}
 }
 
-func startPairing(ctx context.Context, commonSession muxSession, listenConn net.Conn, asServer bool) {
+func startPairing(ctx context.Context, commonSession pairconnect.MuxSession, listenConn net.Conn, asServer bool) {
 	var t *tomb.Tomb
 	t, ctx = tomb.WithContext(ctx)
 	defer func() {
@@ -217,13 +219,14 @@ func startPairing(ctx context.Context, commonSession muxSession, listenConn net.
 	var conn net.Conn
 	var err error
 	if asServer {
-		conn, err = commonSession.AcceptStream()
+		// TODO: client might send multiple requests and produce race conditions for stream, can possibly cause mismatch of connection. It is not gonna be an issue if server only serve one port per ForwardPortServer call, like now. It could use a stream identifier.
+		conn, err = commonSession.Accept()
 		if err != nil {
 			log.Errorf("cannot accept stream on common session")
 			return
 		}
 	} else {
-		conn, err = commonSession.OpenStream()
+		conn, err = commonSession.Open()
 		if err != nil {
 			log.Errorf("cannot open stream on common session")
 			return
@@ -245,7 +248,6 @@ func startPairing(ctx context.Context, commonSession muxSession, listenConn net.
 		ReaderToWriter(conn, listenConn)
 		return nil
 	})
-	<- t.Dying()
+	<-t.Dying()
 	log.Debug("pair closing")
 }
-

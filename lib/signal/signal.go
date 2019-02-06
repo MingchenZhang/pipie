@@ -1,31 +1,34 @@
-package internal
+package signal
 
 import (
+	"github.com/op/go-logging"
 	"os"
 	"os/signal"
 	"syscall"
 )
 
-var signalSIGINT = make(chan os.Signal)
-var signalSIGPIPE = make(chan os.Signal)
+var log, _ = logging.GetLogger("signal")
 
-var sigIgnore = make(map[os.Signal]bool)
+var SignalSIGINT = make(chan os.Signal)
+var SignalSIGPIPE = make(chan os.Signal)
+
+var SigIgnore = make(map[os.Signal]bool)
 
 func init() {
-	registerSignalHandler()
+	RegisterSignalHandler()
 }
 
-func ignoreSignalDefault(sig os.Signal) {
+func IgnoreSignalDefault(sig os.Signal) {
 	log.Debugf("ignoreSignalDefault(%s)", sig)
-	sigIgnore[sig] = true
+	SigIgnore[sig] = true
 }
 
-func unIgnoreSignalDefault(sig os.Signal) {
+func UnIgnoreSignalDefault(sig os.Signal) {
 	log.Debugf("unIgnoreSignalDefault(%s)", sig)
-	delete(sigIgnore, sig)
+	delete(SigIgnore, sig)
 }
 
-func registerSignalHandler() {
+func RegisterSignalHandler() {
 	var sigExitChan = make(chan os.Signal)
 	signal.Notify(sigExitChan, syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGPIPE)
 	go func() {
@@ -34,27 +37,27 @@ func registerSignalHandler() {
 			log.Debugf("signal received: %+v", s)
 			switch s {
 			case syscall.SIGINT:
-				select{
-				case signalSIGINT <- s:
+				select {
+				case SignalSIGINT <- s:
 					break
 				default:
-					if _, ok := sigIgnore[s]; ok {
+					if _, ok := SigIgnore[s]; ok {
 						log.Debugf("SIGINT default ignored")
-					}else{
+					} else {
 						log.Debugf("SIGINT default: exit")
-						os.Exit(128+int(syscall.SIGINT))
+						os.Exit(128 + int(syscall.SIGINT))
 					}
 				}
 			case syscall.SIGPIPE:
-				select{
-				case signalSIGPIPE <- s:
+				select {
+				case SignalSIGPIPE <- s:
 					break
 				default:
-					if _, ok := sigIgnore[s]; ok {
+					if _, ok := SigIgnore[s]; ok {
 						log.Debugf("SIGPIPE default ignored")
-					}else{
+					} else {
 						log.Debugf("SIGPIPE default: exit")
-						os.Exit(128+int(syscall.SIGPIPE))
+						os.Exit(128 + int(syscall.SIGPIPE))
 					}
 				}
 			default:

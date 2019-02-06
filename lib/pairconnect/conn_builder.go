@@ -1,68 +1,84 @@
-package internal
+package pairconnect
 
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	syncthingprotocol "github.com/syncthing/syncthing/lib/protocol"
 )
 
-type PairInfos struct {
+type pairInfos struct {
 	Status    bool     `json:"status"`
 	Code      int      `json:"code,omitempty"`
 	Reason    string   `json:"reason,omitempty"`
-	PairInfo  PairInfo `json:"pairInfo"`  // self
-	Pair2Info PairInfo `json:"pair2Info"` // peer
+	PairInfo  pairInfo `json:"pairInfo"`  // self
+	Pair2Info pairInfo `json:"pair2Info"` // peer
 }
 
-type PairInfo struct {
+type pairInfo struct {
 	PublicIP      string       `json:"publicIP"`
 	PublicPort    string       `json:"publicPort"`
 	InterfaceIP   string       `json:"interfaceIP"`
 	InterfacePort string       `json:"interfacePort"`
-	Meta          PairInfoMeta `json:"meta"`
+	Meta          pairInfoMeta `json:"meta"`
 }
 
-type PairInfoMeta struct {
+type pairInfoMeta struct {
 	Polarity bool `json:"polarity"`
 }
 
-type BuildConnectionConfig struct {
-	ServerAddress string
-	UDPConnection bool
+type buildConnectionConfig struct {
+	pairID        []byte
+	key           []byte
+	serverAddress string
+	udpConnection bool
+	relayPool     *url.URL // must be a static relay address
+	forceRelay    bool
+	peerDeviceID  *syncthingprotocol.DeviceID // nil if permanent mode
+	cert          *tls.Certificate
 }
 
 func setReusableFD(network, address string, c syscall.RawConn) error {
+	errChan := make(chan error)
 	c.Control(func(fd uintptr) {
 		err := syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
 		if err != nil {
-			log.Warning("socket set SO_REUSEADDR failed")
+			log.Notice("socket set SO_REUSEADDR failed")
+			errChan <- err
+			return
 		}
 		// SO_REUSEPORT
 		err = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, 0xf, 1)
 		if err != nil {
-			log.Warning("socket set SO_REUSEPORT failed")
+			log.Notice("socket set SO_REUSEPORT failed")
+			errChan <- err
+			return
 		}
+		errChan <- nil
 	})
-	return nil
+	return <-errChan
 }
 
-func getReuseableDialer() (net.Dialer) {
+func getReuseableDialer() net.Dialer {
 	dialer := net.Dialer{
 		Control: setReusableFD,
 	}
 	return dialer
 }
 
-func getReuseableListenConfig() (net.ListenConfig) {
+func getReuseableListenConfig() net.ListenConfig {
 	config := net.ListenConfig{
 		Control: setReusableFD,
 	}
@@ -90,8 +106,8 @@ func connect(doneC chan byte, result chan net.Conn, localAddr net.Addr, peerAddr
 		//if conn != nil {conn.Close()}
 		nerr := err.(net.Error)
 		if !nerr.Timeout() {
-			log.Debug("connect: encounter non timeout issue")
-			log.Debug(err)
+			log.Error("connect: encounter non timeout issue")
+			log.Error(err)
 			//result <- nil
 			//return
 		}
@@ -104,6 +120,7 @@ func accept(doneC chan byte, result chan net.Conn, localAddr string) {
 	listener, err := config.Listen(context.TODO(), "tcp", localAddr)
 	if err != nil {
 		log.Error("accept: cannot listen")
+		log.Error(err)
 		//result <- nil
 		return
 	}
@@ -126,8 +143,8 @@ func accept(doneC chan byte, result chan net.Conn, localAddr string) {
 		//if conn != nil {conn.Close()}
 		nerr := err.(net.Error)
 		if !nerr.Timeout() {
-			log.Debug("accept: encounter non timeout issue")
-			log.Debug(err)
+			log.Error("accept: encounter non timeout issue")
+			log.Error(err)
 			//result <- nil
 			return
 		}
@@ -135,13 +152,14 @@ func accept(doneC chan byte, result chan net.Conn, localAddr string) {
 
 }
 
-// outdated compared to udp
-func (config BuildConnectionConfig) BuildConnectionTCP(pairID string) (net.Conn, *PairInfoMeta, error) {
+// outdated comparing to udp
+func (config buildConnectionConfig) buildConnectionTCP() (net.Conn, *pairInfoMeta, error) {
 	// get a so_reuseaddr dialer
 	dialer := getReuseableDialer()
-	conn, err := dialer.Dial("tcp", config.ServerAddress)
+	conn, err := dialer.Dial("tcp", config.serverAddress)
 	if err != nil {
-		return nil, nil, errors.New("failed to connect to traversal server")
+		log.Notice("failed to connect to traversal server")
+		return nil, nil, err
 	}
 	defer func() {
 		if conn != nil {
@@ -151,7 +169,7 @@ func (config BuildConnectionConfig) BuildConnectionTCP(pairID string) (net.Conn,
 	localAddr := conn.LocalAddr()
 	localAddrA := strings.Split(localAddr.String(), ":")
 	toSend := map[string]string{
-		"pairID":        pairID,
+		"pairID":        string(config.pairID), // safe as bytes are generated from string
 		"interfaceIP":   localAddrA[0],
 		"interfacePort": localAddrA[1],
 	}
@@ -159,17 +177,19 @@ func (config BuildConnectionConfig) BuildConnectionTCP(pairID string) (net.Conn,
 	conn.Write(append(toSendB[:], []byte("\n")[:]...)) // TODO: should handle error?
 	message, err := bufio.NewReader(conn).ReadString('\n')
 	if err != nil {
-		return nil, nil, errors.New("failed to read from traversal server")
+		log.Notice("failed to read from traversal server")
+		return nil, nil, err
 	}
 	//fmt.Println(message)
-	pairInfo := new(PairInfos)
+	pairInfo := new(pairInfos)
 	if err := json.Unmarshal([]byte(message), &pairInfo); err != nil {
-		fmt.Println(err)
-		return nil, nil, errors.New("read invalid message")
+		log.Notice("read invalid message from traversal server")
+		return nil, nil, err
 	}
 	log.Debugf("%+v\n", pairInfo)
 	if !pairInfo.Status {
-		return nil, nil, errors.New("traversal server status false")
+		log.Notice("traversal server status false")
+		return nil, nil, err
 	}
 	pair1 := pairInfo.PairInfo
 	pair2 := pairInfo.Pair2Info
@@ -198,14 +218,14 @@ func (config BuildConnectionConfig) BuildConnectionTCP(pairID string) (net.Conn,
 	}
 
 	peerConn = <-result
-	log.Debug("BuildConnectionTCP: peer connection established")
+	log.Info("buildConnectionTCP: peer connection established")
 	for i := 0; i < totalGo; i++ {
 		doneC <- 0
 	}
 	return peerConn, &pair1.Meta, nil
 }
 
-func (config BuildConnectionConfig) BuildConnectionUDP(pairID string) (net.PacketConn, net.Addr, *PairInfoMeta, error) {
+func (config buildConnectionConfig) buildConnectionUDP() (net.PacketConn, net.Addr, *pairInfoMeta, error) {
 	ctx := context.Background()
 	ctx, cancelFunc := context.WithCancel(ctx)
 
@@ -225,20 +245,20 @@ func (config BuildConnectionConfig) BuildConnectionUDP(pairID string) (net.Packe
 	})()
 
 	var err error
-	var firstMeta *PairInfoMeta
-	for i := 0; i < TraversalAttempRetry; i++ {
+	var firstMeta *pairInfoMeta
+	for i := 0; i < traversalAttemptRetry; i++ {
 		select {
 		case <-ctx.Done():
 			// cancelled
 			if err == nil {
-				err = errors.New("cancelled ot timeout")
+				err = errors.New("cancelled or timeout")
 			}
 			goto RETURN
 		default:
 		}
-		log.Debugf("beginning traversal round %d", i)
-		ctx, _ := context.WithDeadline(ctx, time.Now().Add(time.Second*TraversalTimeout))
-		conn, addr, meta, erro := config.buildConnectionUDP(ctx, pairID, i)
+		log.Infof("beginning traversal round %d", i)
+		ctx, _ := context.WithDeadline(ctx, time.Now().Add(time.Second*traversalTimeout))
+		conn, addr, meta, erro := config.udpTraverse(ctx, i)
 		if meta != nil && firstMeta == nil {
 			firstMeta = meta
 		}
@@ -253,28 +273,28 @@ RETURN:
 	return nil, nil, nil, err
 }
 
-func (config BuildConnectionConfig) buildConnectionUDP(ctx context.Context, pairID string, roundNum int) (net.PacketConn, net.Addr, *PairInfoMeta, error) {
+func (config buildConnectionConfig) udpTraverse(ctx context.Context, roundNum int) (net.PacketConn, net.Addr, *pairInfoMeta, error) {
 	ctx, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
 
 	var traversalDone = false
 
 	var readBuf [1024]byte
-	serverAddr, err := net.ResolveUDPAddr("udp", config.ServerAddress)
+	serverAddr, err := net.ResolveUDPAddr("udp", config.serverAddress)
 	errorAssert(err)
 	tempConn, err := net.DialUDP("udp", nil, serverAddr)
 	if err != nil {
-		log.Debug(err)
-		return nil, nil, nil, errors.New("failed to connect to traversal server")
+		log.Error("failed to connect to traversal server")
+		return nil, nil, nil, err
 	}
 	localAddr := tempConn.LocalAddr()
 	tempConn.Close()
 	conn, err := net.ListenPacket("udp", localAddr.String())
 	if err != nil {
-		log.Debug(err)
-		return nil, nil, nil, errors.New("failed to connect to traversal server")
+		log.Error("failed to connect to traversal server")
+		return nil, nil, nil, err
 	}
-	log.Debugf("listening on %s", localAddr.String())
+	log.Infof("listening on %s", localAddr.String())
 	defer func() {
 		if conn != nil {
 			conn.Close()
@@ -302,7 +322,7 @@ func (config BuildConnectionConfig) buildConnectionUDP(ctx context.Context, pair
 	}()
 	localAddrA := strings.Split(localAddr.String(), ":")
 	toSend := map[string]string{
-		"pairID":        pairID,
+		"pairID":        string(config.pairID),
 		"interfaceIP":   localAddrA[0],
 		"interfacePort": localAddrA[1],
 	}
@@ -318,21 +338,21 @@ func (config BuildConnectionConfig) buildConnectionUDP(ctx context.Context, pair
 				return
 			}
 			defer tmp.Close()
-			_, err = tmp.WriteTo([]byte(`{"pairID":"`+pairID+`","cancel":true}`), serverAddr)
+			_, err = tmp.WriteTo([]byte(`{"pairID":"`+string(config.pairID)+`","cancel":true}`), serverAddr)
 			if err != nil {
 				log.Debug(err)
 				return
 			}
 		}
 	}()
-	var pairInfo *PairInfos
+	var pairInfo *pairInfos
 	var state uint32 = 0 // 0: waiting pairInfo. 1:sending ping, waiting ping or pong. 2:sending pong, waiting pong. 3:got pong
 	var lastAddr net.Addr
 	var lastAddr2 net.Addr
 	// function to send out the noise to try to punch a hole
 	var sendPingPong = func() {
 		log.Debugf("start sending ping/pong")
-		var delaySend = (roundNum % 2 == 1) != (pairInfo != nil && pairInfo.PairInfo.Meta.Polarity)
+		var delaySend = (roundNum%2 == 1) != (pairInfo != nil && pairInfo.PairInfo.Meta.Polarity)
 		if delaySend {
 			log.Debugf("delay ping/pong send set")
 			time.Sleep(time.Millisecond * 1000)
@@ -340,7 +360,7 @@ func (config BuildConnectionConfig) buildConnectionUDP(ctx context.Context, pair
 		for i := 0; i < 8; i++ {
 			fromPeer := map[string]string{
 				"fromPeer": "",
-				"pairID":   pairID,
+				"pairID":   string(config.pairID),
 			}
 			switch atomic.LoadUint32(&state) {
 			case 1:
@@ -382,8 +402,8 @@ func (config BuildConnectionConfig) buildConnectionUDP(ctx context.Context, pair
 	// both end: wait for pairInfo; keep sending ping. once receive ping, update address, keep sending pong on new address; once receive pong, update address and return
 	for {
 		var (
-			n    int;
-			addr net.Addr;
+			n    int
+			addr net.Addr
 			err  error
 		)
 		//var readFrom = 0
@@ -406,13 +426,14 @@ func (config BuildConnectionConfig) buildConnectionUDP(ctx context.Context, pair
 			//}
 		}
 		if err != nil {
+			log.Error("failed to read from UDP socket")
 			if pairInfo != nil {
-				return nil, nil, &pairInfo.PairInfo.Meta, errors.New("failed to read from UDP socket")
+				return nil, nil, &pairInfo.PairInfo.Meta, err
 			} else {
-				return nil, nil, nil, errors.New("failed to read from UDP socket")
+				return nil, nil, nil, err
 			}
 		}
-		log.Debugf("receives: %s", string(readBuf[:n]))
+		log.Debugf("receives: %s, from %s", string(readBuf[:n]), addr)
 		var message map[string]interface{}
 		if err := json.Unmarshal(readBuf[:n], &message); err != nil {
 			log.Error(err)
@@ -451,7 +472,7 @@ func (config BuildConnectionConfig) buildConnectionUDP(ctx context.Context, pair
 				// send one last pong
 				fromPeer := map[string]string{
 					"fromPeer": "",
-					"pairID":   pairID,
+					"pairID":   string(config.pairID),
 				}
 				fromPeer["fromPeer"] = "pong"
 				f, _ := json.Marshal(fromPeer)
@@ -460,7 +481,7 @@ func (config BuildConnectionConfig) buildConnectionUDP(ctx context.Context, pair
 				break
 			}
 		} else {
-			pairInfo = new(PairInfos)
+			pairInfo = new(pairInfos)
 			if err := json.Unmarshal(readBuf[:n], pairInfo); err != nil {
 				fmt.Println(err)
 				return nil, nil, nil, errors.New("read invalid message")

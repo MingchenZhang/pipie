@@ -1,10 +1,11 @@
-package internal
+package io
 
 import (
 	"bufio"
 	"bytes"
 	"context"
 	"errors"
+	"github.com/mingchenzhang/pipie/lib/pairconnect"
 	"gopkg.in/tomb.v2"
 	"io"
 	"net"
@@ -13,11 +14,8 @@ import (
 )
 
 type ForwardPortClientConfig struct {
-	SockConfig SecureSocketConfig
-	ListenIP   string
-	ListenPort int
-	TargetIP   string
-	TargetPort int
+	ListenHost string
+	ListenPort uint16
 }
 
 type PortForwardClientState int
@@ -27,26 +25,23 @@ const (
 	ClientStateConn1
 )
 
-func (config ForwardPortClientConfig) ForwardPortClient(ctx context.Context, commonSession muxSession) (error) {
+func (config ForwardPortClientConfig) ForwardPortClient(ctx context.Context, commonSession pairconnect.MuxSession) error {
 	var err error
 	var t *tomb.Tomb
 	t, ctx = tomb.WithContext(ctx)
 	defer func() {
-		if err := recover(); err != nil {
-			panic(err)
-		}
 		t.Kill(nil)
 		t.Wait()
 	}()
-	go func() {
-		// handle signal goroutine
-		select {
-		case <- signalSIGINT:
-			t.Kill(nil)
-		case <- t.Dead():
-		}
-	}()
-	commandStream, err := commonSession.OpenStream()
+	//go func() {
+	//	// handle signal goroutine
+	//	select {
+	//	case <- signal.SignalSIGINT:
+	//		t.Kill(nil)
+	//	case <- t.Dead():
+	//	}
+	//}()
+	commandStream, err := commonSession.Open()
 	if err != nil {
 		log.Errorf("cannot open stream on common session")
 		return err
@@ -96,7 +91,7 @@ func (config ForwardPortClientConfig) ForwardPortClient(ctx context.Context, com
 	log.Debugf("port forward server handshake complete")
 
 	// now start listening
-	listener, err := net.Listen("tcp", config.ListenIP+":"+strconv.Itoa(config.ListenPort))
+	listener, err := net.Listen("tcp", config.ListenHost+":"+strconv.Itoa(int(config.ListenPort)))
 	if err != nil {
 		return err
 	}
@@ -109,6 +104,7 @@ func (config ForwardPortClientConfig) ForwardPortClient(ctx context.Context, com
 		defer func() {
 			log.Debugf("command channel dismantling")
 			close(commandReadC)
+			log.Debugf("command channel dismantled")
 		}()
 		for {
 			result, err := cDealer.GetSignal()
@@ -135,6 +131,7 @@ func (config ForwardPortClientConfig) ForwardPortClient(ctx context.Context, com
 		defer func() {
 			log.Debugf("listener channel dismantling")
 			close(connReadC)
+			log.Debugf("listener channel dismantled")
 		}()
 		for {
 			conn, err := listener.Accept()
@@ -158,7 +155,7 @@ func (config ForwardPortClientConfig) ForwardPortClient(ctx context.Context, com
 
 	// main loop
 	log.Infof("port forward server started")
-	log.Infof("listen on %s:%d", config.ListenIP, config.ListenPort)
+	log.Infof("listen on %s:%d", config.ListenHost, config.ListenPort)
 	config.PortForwardClientLoop(t, commonSession, commandReadC, connReadC, cDealer)
 	// TODO: wait and handle exit
 
@@ -167,25 +164,31 @@ func (config ForwardPortClientConfig) ForwardPortClient(ctx context.Context, com
 
 func (config ForwardPortClientConfig) PortForwardClientLoop(
 	t *tomb.Tomb,
-	commonSession muxSession,
+	commonSession pairconnect.MuxSession,
 	commandReadC chan *PortForwardSignal,
 	connReadC chan net.Conn,
 	cDealer signalDealer, // just for writing to peer
-) (error) {
+) error {
 	var err error
 	var state PortForwardClientState = ClientStateWait
 	var pendingConn net.Conn = nil
-	defer func() {if pendingConn != nil {pendingConn.Close()}}()
+	defer func() {
+		if pendingConn != nil {
+			pendingConn.Close()
+		}
+	}()
 	for {
 		// detect cancellation
-		select{
-		case <- t.Dying(): return nil
+		select {
+		case <-t.Dying():
+			return nil
 		default:
 		}
 		switch state {
 		case ClientStateWait: // wait for more connection, or server's goodbye
 			select {
-			case <- t.Dying(): return nil
+			case <-t.Dying():
+				return nil
 			case commandResult, ok := <-commandReadC:
 				if !ok {
 					// command socket closed
@@ -208,10 +211,8 @@ func (config ForwardPortClientConfig) PortForwardClientLoop(
 				}
 				// ask server if connection is ok
 				if err = cDealer.SendSignal(&PortForwardSignal{
-					Version:    protocolVersion,
-					Type:       SignalConnect,
-					TargetIP:   config.TargetIP,
-					TargetPort: config.TargetPort,
+					Version: protocolVersion,
+					Type:    SignalConnect,
 				}); err != nil {
 					log.Error("listener channel signal failed")
 					return err
@@ -221,7 +222,8 @@ func (config ForwardPortClientConfig) PortForwardClientLoop(
 			}
 		case ClientStateConn1: // client has sent the request, waiting for SignalConnectAgree or SignalConnectRefuse
 			select {
-			case <- t.Dying(): return nil
+			case <-t.Dying():
+				return nil
 			case commandResult, ok := <-commandReadC:
 				if !ok {
 					// command socket closed

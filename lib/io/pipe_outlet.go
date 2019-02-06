@@ -1,45 +1,42 @@
-package internal
+package io
 
 import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/mingchenzhang/pipie/lib/pairconnect"
 	"gopkg.in/tomb.v2"
 	"os"
-	"syscall"
 )
 
-func PipeOutlet(ctx context.Context, commonSession muxSession) (error) {
+func PipeOutlet(ctx context.Context, commonSession pairconnect.MuxSession) error {
 	var err error
 	var t *tomb.Tomb
 	t, ctx = tomb.WithContext(ctx)
-	ignoreSignalDefault(syscall.SIGPIPE)
-	defer unIgnoreSignalDefault(syscall.SIGPIPE)
-	ignoreSignalDefault(syscall.SIGINT)
-	defer unIgnoreSignalDefault(syscall.SIGINT)
+	//signal.IgnoreSignalDefault(syscall.SIGPIPE)
+	//defer signal.UnIgnoreSignalDefault(syscall.SIGPIPE)
+	//signal.IgnoreSignalDefault(syscall.SIGINT)
+	//defer signal.UnIgnoreSignalDefault(syscall.SIGINT)
 	defer func() {
-		if err := recover(); err != nil {
-			panic(err)
-		}
 		t.Kill(nil)
 		t.Wait()
 	}()
-	go func() {
-		// handle signal goroutine
-		select {
-		case <- signalSIGINT:
-			t.Kill(nil)
-		case <- t.Dead():
-		}
-	}()
-	theStream, err := commonSession.AcceptStream()
+	//go func() {
+	//	// handle signal goroutine
+	//	select {
+	//	case <- signal.SignalSIGINT:
+	//		t.Kill(nil)
+	//	case <- t.Dead():
+	//	}
+	//}()
+	theStream, err := commonSession.Accept()
 	if err != nil {
 		log.Errorf("cannot open stream on common session")
 		return err
 	}
 	defer func() {
 		err = theStream.Close()
-		if err != nil{
+		if err != nil {
 			log.Warning(err)
 		}
 	}()
@@ -65,7 +62,7 @@ func PipeOutlet(ctx context.Context, commonSession muxSession) (error) {
 		return nil
 	})
 
-	<- t.Dying()
+	<-t.Dying()
 	log.Debug("pipe closing")
 
 	return nil

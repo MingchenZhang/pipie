@@ -1,4 +1,4 @@
-package internal
+package pairconnect
 
 import (
 	"errors"
@@ -13,7 +13,7 @@ type encryptionSpec struct {
 	key []byte
 }
 
-func BuildReliableUDPConn(udpConn net.PacketConn, remoteAddr net.Addr, asServer bool, eSpec *encryptionSpec) (net.Conn, error) {
+func stabilifyUDPConn(udpConn net.PacketConn, remoteAddr net.Addr, asServer bool, eSpec *encryptionSpec) (net.Conn, error) {
 	var udpSession *kcp.UDPSession
 	var err error
 	if asServer {
@@ -25,13 +25,14 @@ func BuildReliableUDPConn(udpConn net.PacketConn, remoteAddr net.Addr, asServer 
 				return nil, errors.New("cannot build reliable UDP Conn: cannot create encryption block")
 			}
 			listener, err = kcp.ServeConn(encryptBlock, 10, 3, udpConn)
-		}else {
+		} else {
 			listener, err = kcp.ServeConn(nil, 10, 3, udpConn)
 		}
 		if err != nil {
 			log.Error(err)
 			return nil, errors.New("cannot build reliable UDP Conn: kcp.ServeConn")
 		}
+		log.Debugf("KCP accepting connection at %s", udpConn.LocalAddr())
 		udpSession, err = listener.AcceptKCP()
 		if err != nil {
 			log.Error(err)
@@ -49,7 +50,7 @@ func BuildReliableUDPConn(udpConn net.PacketConn, remoteAddr net.Addr, asServer 
 				snd_queue := k.FieldByName("snd_queue")
 				var timestamp = time.Now()
 				for snd_buf.Len() > 0 || snd_queue.Len() > 0 {
-					if time.Now().Sub(timestamp) > time.Second * 2 {
+					if time.Now().Sub(timestamp) > time.Second*2 {
 						log.Warningf("waiting for send queue clearing took too long")
 						//timestamp = time.Now() // wait instead of break
 						break // break instead of wait
@@ -69,6 +70,7 @@ func BuildReliableUDPConn(udpConn net.PacketConn, remoteAddr net.Addr, asServer 
 		}
 		return wrapper, nil
 	} else {
+		log.Debugf("KCP connecting to %s, from %s", remoteAddr, udpConn.LocalAddr())
 		if eSpec != nil {
 			encryptBlock, err := kcp.NewAESBlockCrypt(eSpec.key)
 			if err != nil {
@@ -76,7 +78,7 @@ func BuildReliableUDPConn(udpConn net.PacketConn, remoteAddr net.Addr, asServer 
 				return nil, errors.New("cannot build reliable UDP Conn: cannot create encryption block")
 			}
 			udpSession, err = kcp.NewConn(remoteAddr.String(), encryptBlock, 10, 3, udpConn)
-		}else {
+		} else {
 			udpSession, err = kcp.NewConn(remoteAddr.String(), nil, 10, 3, udpConn)
 		}
 		if err != nil {
@@ -93,7 +95,7 @@ func BuildReliableUDPConn(udpConn net.PacketConn, remoteAddr net.Addr, asServer 
 				snd_queue := k.FieldByName("snd_queue")
 				var timestamp = time.Now()
 				for snd_buf.Len() > 0 || snd_queue.Len() > 0 {
-					if time.Now().Sub(timestamp) > time.Second * 2 {
+					if time.Now().Sub(timestamp) > time.Second*2 {
 						log.Warningf("waiting for send queue clearing took too long")
 						//timestamp = time.Now() // wait instead of break
 						break // break instead of wait
@@ -110,8 +112,6 @@ func BuildReliableUDPConn(udpConn net.PacketConn, remoteAddr net.Addr, asServer 
 func configKCPSession(session *kcp.UDPSession) {
 	session.SetMtu(1300)
 	session.SetWindowSize(1024, 1024)
-	session.SetNoDelay(0, 10, 2, 1)
+	session.SetNoDelay(0, 10, 2, 0)
 	session.SetStreamMode(true)
 }
-
-
