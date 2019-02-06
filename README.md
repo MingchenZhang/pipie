@@ -1,4 +1,4 @@
-Pipie - connect to your machine easier
+Pipie - connect to your machine easily
 ------
 If you have an embedded computer or a device that has no public address, and want to connect to it, 
 this piece of software could make your life easier.
