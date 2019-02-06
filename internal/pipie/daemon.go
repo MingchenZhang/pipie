@@ -9,7 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 	"github.com/mingchenzhang/pipie/internal/pipie/exchangestruct"
 	"github.com/mingchenzhang/pipie/internal/pipie/permission"
 	"github.com/mingchenzhang/pipie/lib/pairconnect"
