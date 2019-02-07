@@ -11,7 +11,8 @@ run in background, in port forward mode. You can now SSH to you rpi anywhere you
 download a huge logfile from one of those machine, for local analysis. Just download the binary from github and pipe your file to your local
 machine.  
 
-Notes: please start server side first (one with -s flag)
+Notes: Please start server side first (one with -s flag). 
+Safer key reading will be provided later™
 
 \
 Pipie can do the following (at least for now):

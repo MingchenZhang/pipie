@@ -1,0 +1,32 @@
+language: go
+sudo: false
+matrix:
+  include:
+  - go: 1.x
+    env: LATEST=true
+  - go: 1.11.x
+  allow_failures:
+  - go: 1.x
+
+before_install:
+- go get github.com/mitchellh/gox
+
+install:
+- # skip
+
+script:
+- GO111MODULE=on go mod download
+- GO111MODULE=on go test -v -race ./...
+- if [ "${LATEST}" = "true" ]; then GO111MODULE=on gox -arch="amd64 arm arm64" -output="build/pipie_{{.OS}}_{{.Arch}}" -ldflags "-X main.Rev=`git rev-parse --short HEAD`" -verbose ./cmd/pipie/; fi
+
+deploy:
+  provider: releases
+  skip_cleanup: true
+  api_key:
+    secure: gxvxOibHQ/wVBQXhVXnv/v02ECmIYU0z/KG9B96XKHR8iFs+fLrUXVwxScOGW0hJ+TfJf40xV7nWPtVpfXnszqwcN8EQZYs2PruECdGNM/eEHLOimoalSSXwPmoi36b2LTYzPhYYjW879H026sLljrP2+rywn4tmWcrN8FuQghfb3z+a19X8DbCQbTW+H1QoTeSe7C4NfQe1d3ZTSSVaG8PCXtaGjoleqF6bhKNk/8UJp2W3MA/gPxiD9duo+l8cNT9eI/cnufZN2Vh3PKFSsaO6UX9J2eQ+waCgo7xxiEqSmrftZ+gJpO1f+OkPNxCsyD1YzWTpS5Yy6E4WOCLCPGsLM2RQSHZYQt2jphv5SnkZY/55CJ1xIQvUGS4l9pymVMqphiV3ddLiMlL606/KPBGObZT5xsISUlJgDz045wN7thHPHUFWXL2YapGA0hEAmuTO7ggDj5tBeDnWvPdOpTiS0S94lHZJzR4TO1N2p4zbfEwd6/bg4dmL2FUqsprnhHdr5HW1Oyz+xy8pRzgTQajNV6v2vJ+/9YkL1Tc3riihd6PH5sNl+0HFlmSti1flJoKmRuli+C1EIN6suqAsCkLbLktTw108F7Utvj5XYBcIEAiMyMbwVwjYWe6L1aMUr0GcDFjwrbOYj7onN1xgS2dvuOYg+BZFwAh/zk7NPpw=
+  file_glob: true
+  file: build/pipie_*
+  on:
+    repo: MingchenZhang/travisci-test
+    tags: true
+    condition: $LATEST = true
