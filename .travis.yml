@@ -16,7 +16,7 @@ install:
 
 script:
 - GO111MODULE=on go mod download
-- GO111MODULE=on go test -v -race ./...
+- GO111MODULE=on go test -v -race ./cmd/pipie/
 - if [ "${LATEST}" = "true" ]; then GO111MODULE=on gox -arch="amd64 arm arm64" -output="build/pipie_{{.OS}}_{{.Arch}}" -ldflags "-X main.Rev=`git rev-parse --short HEAD`" -verbose ./cmd/pipie/; fi
 
 deploy:
@@ -27,6 +27,6 @@ deploy:
   file_glob: true
   file: build/pipie_*
   on:
-    repo: MingchenZhang/travisci-test
+    repo: MingchenZhang/pipie
     tags: true
     condition: $LATEST = true
