@@ -108,6 +108,8 @@ func DaemonLoop(
 		if err != nil {
 			if strings.Contains(err.Error(), "connection refused") {
 				continue
+			} else if strings.Contains(err.Error(), "use of closed network connection") {
+				break
 			} else {
 				log.Error(err)
 				break
@@ -253,6 +255,7 @@ func (d *daemon) handleExchange(ctx context.Context, t *tomb.Tomb, oriPayload []
 						return err
 					}
 					// stop the daemon after the pipe is stopped
+					t.Kill(nil)
 					return nil
 				}
 			case *exchangestruct.ExchangeFrame_ExchangeChallengeResponse_Payload_PortForwardTo:

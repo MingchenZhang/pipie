@@ -42,7 +42,6 @@ func TestMain() {
 	var err error
 
 	logBackend := logging.NewLogBackend(os.Stderr, "", 0)
-	logBackendLeveled := logging.AddModuleLevel(logBackend)
 
 	debugPrint := os.Getenv("DEBUG_PRINT") != ""
 	if debugPrint {
@@ -50,15 +49,15 @@ func TestMain() {
 			`%{color}%{shortfunc}:%{shortfile} ▶ %{level:.4s}%{color:reset} %{message}`,
 		)
 		backendFormatter := logging.NewBackendFormatter(logBackend, format)
-		logBackendLeveled.SetLevel(logging.DEBUG, "")
 		logging.SetBackend(backendFormatter)
+		logging.SetLevel(logging.DEBUG, "")
 	} else {
 		var format = logging.MustStringFormatter(
 			`%{level:.4s} %{message}`,
 		)
 		backendFormatter := logging.NewBackendFormatter(logBackend, format)
-		logBackendLeveled.SetLevel(logging.INFO, "")
 		logging.SetBackend(backendFormatter)
+		logging.SetLevel(logging.NOTICE, "")
 	}
 
 	parser := argparse.NewParser("pipie", "Connect machines across network")

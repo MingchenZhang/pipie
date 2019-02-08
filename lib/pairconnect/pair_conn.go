@@ -174,6 +174,9 @@ RelaySkip:
 		if config.polarity {
 			// syncthing relay permanent mode
 			log.Debugf("choosing syncthing relay permanent mode")
+			if logging.GetLevel("") == logging.DEBUG {
+				log.Debugf("as DeviceID %s", syncthingprotocol.NewDeviceID(config.connBuilder.cert.Certificate[0]).String())
+			}
 			client, err := syncthingrelayclient.NewClient(
 				config.connBuilder.relayPool,
 				[]tls.Certificate{*config.connBuilder.cert},
