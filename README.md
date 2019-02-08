@@ -5,14 +5,20 @@ this piece of software could make your life easier.
 
 \
 Use case:
-1. Your raspberry connects to your doom network, which you can't do router port forward. Make this software 
-run in background, in port forward mode. You can now SSH to you rpi anywhere you want.
+1. For example , your raspberry pi is connected to your dorm network. You would like to ssh into the device, but no public 
+ip is assigned to it, and you have no control over dorm network to perform a port forward. 
 2. You have a cluster of servers in a cloud, and no public ip address is assigned to those. Now you need to 
-download a huge logfile from one of those machine, for local analysis. Just download the binary from github and pipe your file to your local
-machine.  
+download a huge logfile from one of those machine, for local analysis. Worse, you are in a library where you are behind 
+a NAT as well.  
 
-Notes: Please start server side first (one with -s flag). 
-Safer key reading will be provided later™
+In the above cases, you can wget the binary from github. Starts them on both end (on demand or as daemon). Pipie will 
+do the hard work of finding addresses, traversing the NAT, securing the connection, or finding the best relay for your need.
+All you need to do is assigning a shared username and key.   
+
+\
+Limitation: 
+1. Please start server side first (one with -s flag). 
+2. Safer key reading mechanism will be provided later™
 
 \
 Pipie can do the following (at least for now):
@@ -36,13 +42,14 @@ Pipie can do the following (at least for now):
 
 \
 Features:
-1. UDP based NAT traversal
-2. Relayed connection, in case NAT traversal is not possible\
+1. UDP based NAT traversal. 
+2. Relayed connection, in case NAT traversal is not possible. \
    Use syncthing relay infrastructure. Special thank to syncthing project.
-3. Encrypted\
-   (propably don't need to be mentioned, it would be strange if it is not encrypted)\
-   (also, no server trust is given)
-4. In alpha. Please don't panic() if you see issues. Would you kindly report it?
+3. Encrypted (no server trust is given)
+4. Protocol is designed to have minimum burden on server side. \
+   Don't worry, no server trust is assumed in the protocol. \
+   You can also run a server you self. 
+5. In alpha. Please don't panic() if you see issue. Would you kindly report it?
 
 
 Server side code is simple, but too messy for public view. Will clean it up and release it later. 
