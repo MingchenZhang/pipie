@@ -38,6 +38,7 @@ var log, _ = logging.GetLogger("pipie")
 // TODO: handle panic in daemon
 // TODO: test port forward, dest is not reachable (and other failures)
 // TODO: investigate port forward server mem leakage if client crash. unclosed kcp conn or what not
+// TODO: wrap signal exchange inside a kcp connection
 func TestMain() {
 	var err error
 

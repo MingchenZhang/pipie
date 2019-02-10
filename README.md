@@ -1,5 +1,7 @@
 Pipie - connect to your machine easily
 ------
+[![Build Status](https://travis-ci.org/MingchenZhang/pipie.svg?branch=master)](https://travis-ci.org/MingchenZhang/pipie)
+
 If you have an embedded computer or a device that has no public address, and want to connect to it, 
 this piece of software could make your life easier.
 

@@ -62,7 +62,8 @@ func PipeInlet(ctx context.Context, commonSession pairconnect.MuxSession) error 
 	//if err := syscall.SetNonblock(syscall.Stdin, true); err != nil {
 	//	log.Warning("syscall.Stdin cannot be set to unblocking")
 	//}
-	stdin := os.NewFile(0, "stdin")
+	//stdin := os.NewFile(0, "stdin")
+	stdin := os.Stdin
 	defer func() {
 		// actually no point in closing stdin. stdin is blocking , so it does not support setDeadline. closing it would not unblock read
 		//stdin.Close()
